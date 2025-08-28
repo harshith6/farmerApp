@@ -20,16 +20,8 @@ const USERS_FILE = path.join(DB_DIR, 'users.json');
 if (!fs.existsSync(ITEMS_FILE)) fs.writeFileSync(ITEMS_FILE, JSON.stringify([]));
 if (!fs.existsSync(USERS_FILE)) fs.writeFileSync(USERS_FILE, JSON.stringify({}));
 
-// Multer setup for uploads
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, path.join(__dirname, 'public', 'uploads'));
-  },
-  filename: function (req, file, cb) {
-    const ext = path.extname(file.originalname);
-    cb(null, Date.now() + '-' + Math.round(Math.random() * 1E9) + ext);
-  }
-});
+// Multer setup: use memory storage so we can decide where to persist at runtime.
+const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
 // API: add item (farmer)
@@ -59,7 +51,26 @@ app.post('/api/upload', upload.single('image'), (req, res) => {
   // simple points calc: 100 points per upload (demo)
   const points = 100;
   users[uid].points += points;
-  const uploadRecord = { id: uuidv4(), file: '/uploads/' + path.basename(req.file.path), points, createdAt: new Date().toISOString() };
+
+  // Try to persist file to disk (public/uploads). If not possible (serverless/Vercel),
+  // fall back to storing a base64 data URL in users.json so the frontend can render it.
+  const uploadDir = path.join(__dirname, 'public', 'uploads');
+  const ext = path.extname(req.file.originalname) || '';
+  const filename = Date.now() + '-' + Math.round(Math.random() * 1e9) + ext;
+  let fileUrl;
+  try {
+    // ensure upload dir exists
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+    // write buffer to disk
+    fs.writeFileSync(path.join(uploadDir, filename), req.file.buffer);
+    fileUrl = '/uploads/' + filename;
+  } catch (err) {
+    // Not writable (common on serverless). Save a data URL instead.
+    const b64 = req.file.buffer.toString('base64');
+    fileUrl = `data:${req.file.mimetype};base64,${b64}`;
+  }
+
+  const uploadRecord = { id: uuidv4(), file: fileUrl, points, createdAt: new Date().toISOString() };
   users[uid].uploads.push(uploadRecord);
   fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
   res.json({ user: users[uid], upload: uploadRecord });
