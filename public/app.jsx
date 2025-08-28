@@ -98,10 +98,17 @@ function Upload({ onUploaded, account }){
     e.preventDefault();
     if(!file) return setStatus('Select an image');
     setStatus('Uploading...');
-    const f = new FormData();
-    f.append('image', file);
-    f.append('userId', account?.id || 'user1');
-    const res = await fetch('/api/upload', { method: 'POST', body: f });
+    // convert file to data URL
+    const toDataUrl = (file) => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    let dataUrl;
+    try { dataUrl = await toDataUrl(file); } catch(e){ setStatus('Failed to read file'); return; }
+
+    const res = await fetch('/api/upload', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ userId: account?.id || 'user1', filename: file.name, dataUrl }) });
     const data = await res.json();
     if(res.ok){
       setStatus('Uploaded: +' + data.upload.points + ' pts');

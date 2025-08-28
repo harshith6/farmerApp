@@ -58,42 +58,65 @@ app.post('/api/upload', upload.single('image'), (req, res) => {
     console.log('upload handler started, file:', req.file && req.file.originalname, 'size:', req.file && req.file.size, 'userId:', userId);
   } catch (e) { console.error('upload-log-error', e && e.stack); }
 
-  if (!req.file) {
+  // prepare variables used by both flows
+  let fileUrl = null;
+  const uploadDir = path.join(__dirname, 'public', 'uploads');
+
+  // Flow A: multipart/form-data via multer
+  if (req.file) {
+    try {
+      if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+      const ext = path.extname(req.file.originalname) || '';
+      const filename = Date.now() + '-' + Math.round(Math.random() * 1e9) + ext;
+      fs.writeFileSync(path.join(uploadDir, filename), req.file.buffer);
+      fileUrl = '/uploads/' + filename;
+      console.log('upload saved to disk (multipart):', fileUrl);
+    } catch (err) {
+      // Not writable (common on serverless). Save a data URL instead.
+      try {
+        console.error('write-to-disk failed (multipart), falling back to data URL:', err && err.message);
+        const b64 = req.file.buffer.toString('base64');
+        fileUrl = `data:${req.file.mimetype};base64,${b64}`;
+        console.log('upload saved as data URL (in-users-json) size:', (fileUrl.length/1024).toFixed(1), 'KB');
+      } catch (e2) {
+        console.error('fallback data-url failed', e2 && e2.stack);
+        return res.status(500).json({ error: 'failed to process upload' });
+      }
+    }
+  } else if (req.body && req.body.dataUrl) {
+    // Flow B: JSON body with dataUrl (frontend/serverless)
+    console.log('upload: received dataUrl in JSON body, will process as upload');
+    const dataUrl = req.body.dataUrl;
+    const mimematch = dataUrl.match(/^data:(.+);base64,(.+)$/);
+    if (mimematch) {
+      const mime = mimematch[1];
+      const b64 = mimematch[2];
+      const ext = req.body.filename && req.body.filename.includes('.') ? path.extname(req.body.filename) : (mime.split('/')[1] ? `.${mime.split('/')[1].split('+')[0]}` : '');
+      const filename = Date.now() + '-' + Math.round(Math.random() * 1e9) + ext;
+      try {
+        if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+        fs.writeFileSync(path.join(uploadDir, filename), Buffer.from(b64, 'base64'));
+        fileUrl = '/uploads/' + filename;
+        console.log('upload saved to disk from dataUrl:', fileUrl);
+      } catch (err) {
+        console.error('write-to-disk (dataUrl) failed, will store dataUrl in users.json', err && err.message);
+        fileUrl = dataUrl;
+      }
+    } else {
+      console.error('upload failed: unsupported dataUrl format');
+      return res.status(400).json({ error: 'unsupported dataUrl' });
+    }
+  } else {
     console.error('upload failed: no file in request');
     return res.status(400).json({ error: 'image required' });
   }
+
+  // Persist metadata and award points
   const users = JSON.parse(fs.readFileSync(USERS_FILE));
   const uid = userId || 'guest';
   if (!users[uid]) users[uid] = { id: uid, points: 0, uploads: [] };
-  // simple points calc: 100 points per upload (demo)
   const points = 100;
   users[uid].points += points;
-
-  // Try to persist file to disk (public/uploads). If not possible (serverless/Vercel),
-  // fall back to storing a base64 data URL in users.json so the frontend can render it.
-  const uploadDir = path.join(__dirname, 'public', 'uploads');
-  const ext = path.extname(req.file.originalname) || '';
-  const filename = Date.now() + '-' + Math.round(Math.random() * 1e9) + ext;
-  let fileUrl;
-  try {
-    // ensure upload dir exists
-    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-    // write buffer to disk
-    fs.writeFileSync(path.join(uploadDir, filename), req.file.buffer);
-    fileUrl = '/uploads/' + filename;
-    console.log('upload saved to disk:', fileUrl);
-  } catch (err) {
-    // Not writable (common on serverless). Save a data URL instead.
-    try {
-      console.error('write-to-disk failed, falling back to data URL:', err && err.message);
-      const b64 = req.file.buffer.toString('base64');
-      fileUrl = `data:${req.file.mimetype};base64,${b64}`;
-      console.log('upload saved as data URL (in-users-json) size:', (fileUrl.length/1024).toFixed(1), 'KB');
-    } catch (e2) {
-      console.error('fallback data-url failed', e2 && e2.stack);
-      return res.status(500).json({ error: 'failed to process upload' });
-    }
-  }
 
   const uploadRecord = { id: uuidv4(), file: fileUrl, points, createdAt: new Date().toISOString() };
   users[uid].uploads.push(uploadRecord);
