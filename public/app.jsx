@@ -255,21 +255,54 @@ function App(){
     try{ return JSON.parse(localStorage.getItem('account')); }catch(e){ return null; }
   });
 
-  useEffect(()=>{ if(account){ fetch('/api/user/'+account.id).then(r=>r.json()).then(d=>setUserData(d)).catch(()=>{}); } }, [account]);
+  useEffect(()=>{
+    if(!account) return;
+    // load cached user data first so UI is responsive
+    try{
+      const cached = JSON.parse(localStorage.getItem('userData_' + account.id));
+      if (cached) setUserData(cached);
+    }catch(e){}
+
+    // then fetch server and merge with cache to avoid losing uploads from ephemeral writes
+    fetch('/api/user/'+account.id).then(r=>r.json()).then(serverUser=>{
+      try{
+        const cached = JSON.parse(localStorage.getItem('userData_' + account.id)) || {};
+        const map = {};
+        const mergedUploads = [];
+        (serverUser.uploads || []).concat(cached.uploads || []).forEach(u=>{ if(!map[u.id]){ map[u.id]=u; mergedUploads.push(u); } });
+        const points = Math.max(Number(serverUser.points||0), Number(cached.points||0));
+        const merged = {...serverUser, uploads: mergedUploads, points };
+        setUserData(merged);
+        localStorage.setItem('userData_' + account.id, JSON.stringify(merged));
+      }catch(e){ setUserData(serverUser); }
+    }).catch(()=>{});
+  }, [account]);
   async function refreshAll(userParam){
     await refreshItems();
     if (userParam) {
       setUserData(userParam);
+      try{ localStorage.setItem('userData_' + account.id, JSON.stringify(userParam)); }catch(e){}
     } else if (account) {
-      const u = await (await fetch('/api/user/'+account.id)).json();
-      setUserData(u);
+      const serverUser = await (await fetch('/api/user/'+account.id)).json();
+      try{
+        const cached = JSON.parse(localStorage.getItem('userData_' + account.id)) || {};
+        const map = {};
+        const mergedUploads = [];
+        (serverUser.uploads || []).concat(cached.uploads || []).forEach(u=>{ if(!map[u.id]){ map[u.id]=u; mergedUploads.push(u); } });
+        const points = Math.max(Number(serverUser.points||0), Number(cached.points||0));
+        const merged = {...serverUser, uploads: mergedUploads, points };
+        setUserData(merged);
+        localStorage.setItem('userData_' + account.id, JSON.stringify(merged));
+      }catch(e){ setUserData(serverUser); }
     }
   }
 
   useEffect(()=>{ refreshAll(); }, [account]);
 
   function onLogin(acc){ setAccount(acc); localStorage.setItem('account', JSON.stringify(acc)); setView('dashboard'); }
-  function logout(){ setAccount(null); localStorage.removeItem('account'); setUserData(null); setCart([]); }
+  function logout(){ 
+    try{ if(account) localStorage.removeItem('userData_' + account.id); }catch(e){}
+    setAccount(null); localStorage.removeItem('account'); setUserData(null); setCart([]); }
 
   const [toast, setToast] = useState(null);
   function addToCart(id){ setCart(s=>[...s,id]); setToast('Added to cart'); setTimeout(()=>setToast(null), 1800); }
@@ -280,6 +313,12 @@ function App(){
     const d = await res.json();
     if(res.ok){ alert('Order placed'); setCart([]); setUserData(u=>({...u, points: d.points})); } else alert(d.error || 'Checkout failed');
   }
+  
+  // update local cache when points change via checkout
+  useEffect(()=>{
+    if(!account || !userData) return;
+    try{ localStorage.setItem('userData_' + account.id, JSON.stringify(userData)); }catch(e){}
+  }, [userData]);
 
   // If not logged in, show Login
   if(!account) return (
