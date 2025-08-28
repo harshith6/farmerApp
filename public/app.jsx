@@ -78,13 +78,18 @@ function Dashboard({ user, items, onView }){
   );
 }
 
-function Upload({ onUploaded, account }){
+function Upload({ onUploaded, account, userData }){
   const [file, setFile] = useState(null);
   const [status, setStatus] = useState(null);
   const [uploads, setUploads] = useState([]);
 
   async function loadUploads(){
     if(!account) return;
+    // prefer using parent-provided userData (which is cached/merged) so uploads persist across instances
+    if (userData && Array.isArray(userData.uploads)) {
+      setUploads(userData.uploads);
+      return;
+    }
     try{
       const res = await fetch('/api/user/'+account.id);
       const data = await res.json();
@@ -349,7 +354,7 @@ function App(){
       <div className="w-full flex justify-center">
         <div className="w-full max-w-xl px-2">
           {view==='dashboard' && <Dashboard user={userData} items={items||[]} onView={setView} />}
-          {view==='upload' && account.role==='user' && <Upload onUploaded={refreshAll} account={account} />}
+          {view==='upload' && account.role==='user' && <Upload onUploaded={refreshAll} account={account} userData={userData} />}
           {view==='farmer' && account.role==='farmer' && <FarmerAdd onAdd={refreshItems} />}
           {view==='market' && <Marketplace items={items||[]} onAdd={addToCart} />}
           {view==='cart' && <CartView items={items||[]} cart={cart} onRemove={removeFromCart} onCheckout={checkout} user={userData} />}
