@@ -111,10 +111,13 @@ function Upload({ onUploaded, account }){
     const res = await fetch('/api/upload', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ userId: account?.id || 'user1', filename: file.name, dataUrl }) });
     const data = await res.json();
     if(res.ok){
-      setStatus('Uploaded: +' + data.upload.points + ' pts');
-      // refresh parent and local list
-      if(onUploaded) await onUploaded();
-      await loadUploads();
+      setStatus('Uploaded: +' + (data.upload?.points || 0) + ' pts');
+      // update parent and local state from returned user object when available
+      if(onUploaded) await onUploaded(data.user);
+      if (data.user && data.user.uploads) setUploads(data.user.uploads);
+      else setUploads(u=> (u.concat([data.upload])) );
+      // also update dashboard via parent refreshAll helper (pass user)
+      try{ if(onUploaded) await onUploaded(data.user); }catch(e){}
     } else setStatus(data.error || 'Failed');
   }
 
@@ -253,7 +256,15 @@ function App(){
   });
 
   useEffect(()=>{ if(account){ fetch('/api/user/'+account.id).then(r=>r.json()).then(d=>setUserData(d)).catch(()=>{}); } }, [account]);
-  async function refreshAll(){ await refreshItems(); if(account){ const u = await (await fetch('/api/user/'+account.id)).json(); setUserData(u); } }
+  async function refreshAll(userParam){
+    await refreshItems();
+    if (userParam) {
+      setUserData(userParam);
+    } else if (account) {
+      const u = await (await fetch('/api/user/'+account.id)).json();
+      setUserData(u);
+    }
+  }
 
   useEffect(()=>{ refreshAll(); }, [account]);
 
