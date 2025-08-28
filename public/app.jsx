@@ -305,9 +305,14 @@ function App(){
   useEffect(()=>{ refreshAll(); }, [account]);
 
   function onLogin(acc){ setAccount(acc); localStorage.setItem('account', JSON.stringify(acc)); setView('dashboard'); }
-  function logout(){ 
-    try{ if(account) localStorage.removeItem('userData_' + account.id); }catch(e){}
-    setAccount(null); localStorage.removeItem('account'); setUserData(null); setCart([]); }
+  function logout(){
+    // Do not remove cached userData on logout so users returning to the app still see their points/uploads
+    // (serverless storage is ephemeral; cache improves UX).
+    setAccount(null);
+    localStorage.removeItem('account');
+    setUserData(null);
+    setCart([]);
+  }
 
   const [toast, setToast] = useState(null);
   function addToCart(id){ setCart(s=>[...s,id]); setToast('Added to cart'); setTimeout(()=>setToast(null), 1800); }
