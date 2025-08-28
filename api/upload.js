@@ -27,6 +27,7 @@ module.exports = async (req, res) => {
     let fileUrl = dataUrl;
 
     // For convenience save a small file copy in a writable uploads dir (use DATA_DIR/public/uploads)
+    // Also ensure we return a usable data URL to the client so it can render the image even if /uploads isn't served.
     try {
       const uploadDir = path.join(DATA_DIR, 'public', 'uploads');
       if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
@@ -37,13 +38,16 @@ module.exports = async (req, res) => {
         const b64 = match[2];
         const ext = filename && filename.includes('.') ? path.extname(filename) : (mime.split('/')[1] ? `.${mime.split('/')[1].split('+')[0]}` : '');
         const outName = Date.now() + '-' + Math.round(Math.random()*1e9) + ext;
-        fs.writeFileSync(path.join(uploadDir, outName), Buffer.from(b64, 'base64'));
-        // Note: this path is not served by Vercel static files; frontend can render data URLs or take fileUrl returned
-        fileUrl = '/uploads/' + outName; // still useful for local dev
-        console.log('[api/upload] saved file to DATA_DIR upload path', fileUrl);
+        const outPath = path.join(uploadDir, outName);
+        fs.writeFileSync(outPath, Buffer.from(b64, 'base64'));
+        // On local dev the public/uploads path may be served; on Vercel it's not. Always return a data URL so frontend can render.
+        fileUrl = `data:${mime};base64,${b64}`;
+        console.log('[api/upload] saved file to DATA_DIR upload path', outPath);
       }
     } catch (e) {
       console.error('[api/upload] failed to write to DATA_DIR/public/uploads', e && e.stack);
+      // fallback: ensure returned fileUrl remains a data URL (we already set it earlier from dataUrl)
+      fileUrl = dataUrl;
     }
 
     const uploadRecord = { id: uuidv4(), file: fileUrl, points, createdAt: new Date().toISOString() };
