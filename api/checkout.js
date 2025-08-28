@@ -1,11 +1,12 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { v4: uuidv4 } = require('uuid');
 
-const DB_DIR = path.join(process.cwd(), 'data');
-const USERS_FILE = path.join(DB_DIR, 'users.json');
-if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR);
-if (!fs.existsSync(USERS_FILE)) fs.writeFileSync(USERS_FILE, JSON.stringify({}));
+const DATA_DIR = process.env.DATA_DIR || path.join(os.tmpdir(), 'farmerapp-data');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
+try { if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) { console.error('[api/checkout] could not create DATA_DIR', DATA_DIR, e && e.message); }
+if (!fs.existsSync(USERS_FILE)) try { fs.writeFileSync(USERS_FILE, JSON.stringify({})); } catch (e) { console.error('[api/checkout] failed to create users.json in DATA_DIR', e && e.message); }
 
 module.exports = async (req, res) => {
   try {
