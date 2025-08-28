@@ -11,6 +11,16 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Simple request logger to surface details in Vercel/host logs
+app.use((req, res, next) => {
+  try {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} - ip=${req.ip}` + (req.body && Object.keys(req.body).length ? ` body=${JSON.stringify(req.body)}` : ''));
+  } catch (e) {
+    console.log('log-error', e && e.stack);
+  }
+  next();
+});
+
 // simple JSON stores (not for production)
 const DB_DIR = path.join(__dirname, 'data');
 if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR);
@@ -43,8 +53,15 @@ app.get('/api/items', (req, res) => {
 
 // API: upload planting image (user) -> award points
 app.post('/api/upload', upload.single('image'), (req, res) => {
-  const { userId } = req.body;
-  if (!req.file) return res.status(400).json({ error: 'image required' });
+  const { userId } = req.body || {};
+  try {
+    console.log('upload handler started, file:', req.file && req.file.originalname, 'size:', req.file && req.file.size, 'userId:', userId);
+  } catch (e) { console.error('upload-log-error', e && e.stack); }
+
+  if (!req.file) {
+    console.error('upload failed: no file in request');
+    return res.status(400).json({ error: 'image required' });
+  }
   const users = JSON.parse(fs.readFileSync(USERS_FILE));
   const uid = userId || 'guest';
   if (!users[uid]) users[uid] = { id: uid, points: 0, uploads: [] };
@@ -64,16 +81,32 @@ app.post('/api/upload', upload.single('image'), (req, res) => {
     // write buffer to disk
     fs.writeFileSync(path.join(uploadDir, filename), req.file.buffer);
     fileUrl = '/uploads/' + filename;
+    console.log('upload saved to disk:', fileUrl);
   } catch (err) {
     // Not writable (common on serverless). Save a data URL instead.
-    const b64 = req.file.buffer.toString('base64');
-    fileUrl = `data:${req.file.mimetype};base64,${b64}`;
+    try {
+      console.error('write-to-disk failed, falling back to data URL:', err && err.message);
+      const b64 = req.file.buffer.toString('base64');
+      fileUrl = `data:${req.file.mimetype};base64,${b64}`;
+      console.log('upload saved as data URL (in-users-json) size:', (fileUrl.length/1024).toFixed(1), 'KB');
+    } catch (e2) {
+      console.error('fallback data-url failed', e2 && e2.stack);
+      return res.status(500).json({ error: 'failed to process upload' });
+    }
   }
 
   const uploadRecord = { id: uuidv4(), file: fileUrl, points, createdAt: new Date().toISOString() };
   users[uid].uploads.push(uploadRecord);
-  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+  try {
+    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+    console.log('users.json updated for', uid);
+  } catch (e) {
+    console.error('failed to write users.json', e && e.stack);
+    return res.status(500).json({ error: 'failed to save upload metadata' });
+  }
+
   res.json({ user: users[uid], upload: uploadRecord });
+  try { console.log('upload handler finished for', uid, uploadRecord.id); } catch (e){}
 });
 
 // API: get user
